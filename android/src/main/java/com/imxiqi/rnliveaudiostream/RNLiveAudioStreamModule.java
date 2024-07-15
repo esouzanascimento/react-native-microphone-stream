@@ -2,8 +2,9 @@ package com.imxiqi.rnliveaudiostream;
 
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.AudioTrack;
 import android.media.MediaRecorder.AudioSource;
-import android.util.Base64;
+import android.media.AudioManager;
 import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
@@ -11,14 +12,12 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.modules.core.DeviceEventManagerModule;
 
 import java.lang.Math;
 
 public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
     private final ReactApplicationContext reactContext;
-    private DeviceEventManagerModule.RCTDeviceEventEmitter eventEmitter;
 
     private int sampleRateInHz;
     private int channelConfig;
@@ -26,8 +25,11 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     private int audioSource;
 
     private AudioRecord recorder;
+    private AudioTrack audioTrack;
     private int bufferSize;
     private boolean isRecording;
+
+    private float gainFactor = 15.0f;
 
     public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -66,7 +68,6 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
         }
 
         isRecording = false;
-        eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
 
         bufferSize = AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat);
 
@@ -76,19 +77,23 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
         int recordingBufferSize = bufferSize * 3;
         recorder = new AudioRecord(audioSource, sampleRateInHz, channelConfig, audioFormat, recordingBufferSize);
+
+        int playbackChannelConfig = (channelConfig == AudioFormat.CHANNEL_IN_MONO) ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO;
+        audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRateInHz, playbackChannelConfig, audioFormat, bufferSize, AudioTrack.MODE_STREAM);
+        audioTrack.setVolume(AudioTrack.getMaxVolume());
     }
 
     @ReactMethod
     public void start() {
         isRecording = true;
         recorder.startRecording();
+        audioTrack.play();
 
         Thread recordingThread = new Thread(new Runnable() {
             public void run() {
                 try {
                     int bytesRead;
                     int count = 0;
-                    String base64Data;
                     byte[] buffer = new byte[bufferSize];
 
                     while (isRecording) {
@@ -96,11 +101,18 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
                         // skip first 2 buffers to eliminate "click sound"
                         if (bytesRead > 0 && ++count > 2) {
-                            base64Data = Base64.encodeToString(buffer, Base64.NO_WRAP);
-                            eventEmitter.emit("data", base64Data);
+                            // Apply gain factor to increase volume
+                            for (int i = 0; i < bytesRead; i += 2) {
+                                short sample = (short) ((buffer[i] & 0xFF) | (buffer[i + 1] << 8));
+                                sample = (short) Math.min(Math.max(sample * gainFactor, Short.MIN_VALUE), Short.MAX_VALUE);
+                                buffer[i] = (byte) (sample & 0xFF);
+                                buffer[i + 1] = (byte) ((sample >> 8) & 0xFF);
+                            }
+                            audioTrack.write(buffer, 0, bytesRead);
                         }
                     }
                     recorder.stop();
+                    audioTrack.stop();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -113,5 +125,6 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void stop(Promise promise) {
         isRecording = false;
+        promise.resolve(null);
     }
 }

@@ -1,4 +1,4 @@
-declare module "react-native-live-audio-stream" {
+declare module "react-native-i2l-voice" {
   export interface IAudioRecord {
     init: (options: Options) => void
     start: () => void
