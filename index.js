@@ -14,12 +14,8 @@ AudioRecord.isExternalAudioOutputConnected = () =>
       .catch(error => reject(error));
   });
 
-AudioRecord.onAudioRouteChange = callback => {
-  return EventEmitter.addListener('onAudioRouteChange', callback);
-};
-
 const eventsMap = {
-  data: 'data'
+  onAudioRouteChange: 'onAudioRouteChange'
 };
 
 AudioRecord.on = (event, callback) => {

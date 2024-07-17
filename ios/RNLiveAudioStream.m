@@ -182,7 +182,7 @@ void HandleOutputBuffer(void *inUserData,
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-    return @[@"data"];
+    return @[@"data", @"onAudioRouteChange"];
 }
 
 - (void)dealloc {
