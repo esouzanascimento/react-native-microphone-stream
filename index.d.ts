@@ -5,6 +5,7 @@ declare module "react-native-i2l-voice" {
     stop: () => Promise<string>
     on: (event: "data", callback: (data: string) => void) => void
     isExternalAudioOutputConnected: () => Promise<boolean>
+    onAudioRouteChange: (callback: (status: string) => void) => void
   }
 
   export interface Options {

@@ -18,4 +18,5 @@ typedef struct {
 
 @interface RNLiveAudioStream: RCTEventEmitter <RCTBridgeModule>
 @property (nonatomic, assign) AQRecordState recordState;
+- (void)handleAudioRouteChange:(NSNotification *)notification;
 @end

@@ -17,6 +17,10 @@ import android.content.Context;
 import android.media.AudioDeviceInfo;
 import com.facebook.react.bridge.Callback;
 
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import java.lang.Math;
 
 public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
@@ -38,6 +42,21 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
         super(reactContext);
         this.reactContext = reactContext;
+        this.audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
+
+        IntentFilter filter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
+        audioOutputReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.hasExtra("state")) {
+                    if (intent.getIntExtra("state", 0) == 0) { // Unplugged
+                        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onAudioRouteChange", "unplugged");
+                    }
+                }
+            }
+        };
+        reactContext.registerReceiver(audioOutputReceiver, filter);
     }
 
     @Override

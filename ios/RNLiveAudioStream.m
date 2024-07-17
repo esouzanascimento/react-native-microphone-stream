@@ -5,6 +5,17 @@
 
 RCT_EXPORT_MODULE();
 
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(handleAudioRouteChange:)
+                                                     name:AVAudioSessionRouteChangeNotification
+                                                   object:nil];
+    }
+    return self;
+}
+
 RCT_EXPORT_METHOD(init:(NSDictionary *)options) {
     RCTLogInfo(@"[RNLiveAudioStream] init");
     _recordState.mDataFormat.mSampleRate = options[@"sampleRate"] == nil ? 44100 : [options[@"sampleRate"] doubleValue];
@@ -159,6 +170,15 @@ void HandleOutputBuffer(void *inUserData,
                         AudioQueueBufferRef inBuffer) {
     // This function can be used to manage the output buffers if necessary
     // For now, we can leave it empty or add logging if needed
+}
+
+- (void)handleAudioRouteChange:(NSNotification *)notification {
+    NSDictionary *userInfo = notification.userInfo;
+    AVAudioSessionRouteChangeReason reason = [userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue];
+
+    if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
+        [self sendEventWithName:@"onAudioRouteChange" body:@{@"status": @"unplugged"}];
+    }
 }
 
 - (NSArray<NSString *> *)supportedEvents {
