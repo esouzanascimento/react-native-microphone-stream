@@ -13,6 +13,10 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 
+import android.content.Context;
+import android.media.AudioDeviceInfo;
+import com.facebook.react.bridge.Callback;
+
 import java.lang.Math;
 
 public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
@@ -126,5 +130,25 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     public void stop(Promise promise) {
         isRecording = false;
         promise.resolve(null);
+    }
+
+    @ReactMethod
+    public void isExternalAudioOutputConnected(Callback callback) {
+        AudioManager audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+            for (AudioDeviceInfo device : devices) {
+                if (device.getType() == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    device.getType() == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    device.getType() == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    device.getType() == AudioDeviceInfo.TYPE_USB_ACCESSORY) {
+                    callback.invoke(true);
+                    return;
+                }
+            }
+        }
+        callback.invoke(false);
     }
 }

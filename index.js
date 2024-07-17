@@ -7,6 +7,12 @@ const AudioRecord = {};
 AudioRecord.init = options => RNLiveAudioStream.init(options);
 AudioRecord.start = () => RNLiveAudioStream.start();
 AudioRecord.stop = () => RNLiveAudioStream.stop();
+AudioRecord.isExternalAudioOutputConnected = () =>
+  new Promise((resolve, reject) => {
+    RNLiveAudioStream.isExternalAudioOutputConnected()
+      .then(isConnected => resolve(isConnected))
+      .catch(error => reject(error));
+  });
 
 const eventsMap = {
   data: 'data'

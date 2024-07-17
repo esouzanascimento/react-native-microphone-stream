@@ -97,6 +97,28 @@ RCT_EXPORT_METHOD(stop) {
     }
 }
 
+RCT_EXPORT_METHOD(isExternalAudioOutputConnected:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+    NSArray *outputs = audioSession.currentRoute.outputs;
+    BOOL isConnected = NO;
+
+    for (AVAudioSessionPortDescription *output in outputs) {
+        if ([output.portType isEqualToString:AVAudioSessionPortHeadphones] ||
+            [output.portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
+            [output.portType isEqualToString:AVAudioSessionPortBluetoothLE] ||
+            [output.portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+            [output.portType isEqualToString:AVAudioSessionPortHDMI] ||
+            [output.portType isEqualToString:AVAudioSessionPortCarAudio] ||
+            [output.portType isEqualToString:AVAudioSessionPortLineOut] ||
+            [output.portType isEqualToString:AVAudioSessionPortUSBAudio]) {
+            isConnected = YES;
+            break;
+        }
+    }
+
+    resolve(@(isConnected));
+}
+
 void HandleInputBuffer(void *inUserData,
                        AudioQueueRef inAQ,
                        AudioQueueBufferRef inBuffer,
