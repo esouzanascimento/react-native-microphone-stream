@@ -18,7 +18,6 @@ import android.media.AudioDeviceInfo;
 import com.facebook.react.bridge.Callback;
 
 import android.content.BroadcastReceiver;
-import android.content.Intent;
 import android.content.IntentFilter;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import java.lang.Math;
@@ -26,6 +25,7 @@ import java.lang.Math;
 public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
     private final ReactApplicationContext reactContext;
+    private final AudioManager audioManager;
 
     private int sampleRateInHz;
     private int channelConfig;
@@ -42,21 +42,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
         super(reactContext);
         this.reactContext = reactContext;
-        this.audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
-
-        IntentFilter filter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
-        audioOutputReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (intent.hasExtra("state")) {
-                    if (intent.getIntExtra("state", 0) == 0) { // Unplugged
-                        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                                .emit("onAudioRouteChange", "unplugged");
-                    }
-                }
-            }
-        };
-        reactContext.registerReceiver(audioOutputReceiver, filter);
+        audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
     }
 
     @Override
@@ -120,6 +106,12 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                     byte[] buffer = new byte[bufferSize];
 
                     while (isRecording) {
+                        if (!isExternalAudioOutputConnected()) {
+                            isRecording = false;
+                            reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onAudioRouteChange", "unplugged");
+                            break;
+                        }
                         bytesRead = recorder.read(buffer, 0, buffer.length);
 
                         // skip first 2 buffers to eliminate "click sound"
@@ -151,9 +143,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
         promise.resolve(null);
     }
 
-    @ReactMethod
-    public void isExternalAudioOutputConnected(Promise promise) {
-        AudioManager audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
+    public boolean isExternalAudioOutputConnected() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
             for (AudioDeviceInfo device : devices) {
@@ -163,11 +153,15 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                     device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                     device.getType() == AudioDeviceInfo.TYPE_USB_DEVICE ||
                     device.getType() == AudioDeviceInfo.TYPE_USB_ACCESSORY) {
-                    promise.resolve(true);
-                    return;
+                    return true;
                 }
             }
         }
-        promise.resolve(false);
+        return false;
+    }
+
+    @ReactMethod
+    public void isExternalAudioOutputConnected(Promise promise) {
+        promise.resolve(isExternalAudioOutputConnected());
     }
 }
