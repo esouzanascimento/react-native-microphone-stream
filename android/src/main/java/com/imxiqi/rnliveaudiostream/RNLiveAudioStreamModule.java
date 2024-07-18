@@ -152,7 +152,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void isExternalAudioOutputConnected(Callback callback) {
+    public void isExternalAudioOutputConnected(Promise promise) {
         AudioManager audioManager = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
@@ -163,11 +163,11 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                     device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                     device.getType() == AudioDeviceInfo.TYPE_USB_DEVICE ||
                     device.getType() == AudioDeviceInfo.TYPE_USB_ACCESSORY) {
-                    callback.invoke(true);
+                    promise.resolve(true);
                     return;
                 }
             }
         }
-        callback.invoke(false);
+        promise.resolve(false);
     }
 }
