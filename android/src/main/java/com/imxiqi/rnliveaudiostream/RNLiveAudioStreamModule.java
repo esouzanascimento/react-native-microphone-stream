@@ -37,7 +37,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     private int bufferSize;
     private boolean isRecording;
 
-    private float gainFactor = 15.0f;
+    private float gainFactor = 10.0f;
 
     public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
         super(reactContext);
