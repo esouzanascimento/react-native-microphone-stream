@@ -38,12 +38,11 @@ RCT_EXPORT_METHOD(start) {
     BOOL success;
 
     if (@available(iOS 10.0, *)) {
+        // Set the audio session category and options
         success = [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
                                        mode:AVAudioSessionModeDefault
                                     options:AVAudioSessionCategoryOptionDefaultToSpeaker |
-                                             AVAudioSessionCategoryOptionAllowBluetooth |
-                                             AVAudioSessionCategoryOptionAllowBluetoothA2DP |
-                                             AVAudioSessionCategoryOptionAllowAirPlay
+                                             AVAudioSessionCategoryOptionAllowBluetoothA2DP
                                       error:&error];
     } else {
         success = [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionDefaultToSpeaker error:&error];

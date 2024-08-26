@@ -95,6 +95,13 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void start() {
         isRecording = true;
+
+        // Set up the audio routing to ensure the device microphone is used
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            audioManager.setSpeakerphoneOn(false);
+        }
+
         recorder.startRecording();
         audioTrack.play();
 
