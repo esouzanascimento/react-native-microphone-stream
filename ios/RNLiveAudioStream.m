@@ -113,14 +113,8 @@ RCT_EXPORT_METHOD(isExternalAudioOutputConnected:(RCTPromiseResolveBlock)resolve
     BOOL isConnected = NO;
 
     for (AVAudioSessionPortDescription *output in outputs) {
-        if ([output.portType isEqualToString:AVAudioSessionPortHeadphones] ||
-            [output.portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
-            [output.portType isEqualToString:AVAudioSessionPortBluetoothLE] ||
-            [output.portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
-            [output.portType isEqualToString:AVAudioSessionPortHDMI] ||
-            [output.portType isEqualToString:AVAudioSessionPortCarAudio] ||
-            [output.portType isEqualToString:AVAudioSessionPortLineOut] ||
-            [output.portType isEqualToString:AVAudioSessionPortUSBAudio]) {
+        if (output.portType != AVAudioSessionPortBuiltInSpeaker &&
+            output.portType != AVAudioSessionPortBuiltInReceiver) {
             isConnected = YES;
             break;
         }
