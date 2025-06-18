@@ -84,7 +84,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
             bufferSize = Math.max(bufferSize, options.getInt("bufferSize"));
         }
 
-        int recordingBufferSize = bufferSize * 3;
+        int recordingBufferSize = bufferSize;
         recorder = new AudioRecord(audioSource, sampleRateInHz, channelConfig, audioFormat, recordingBufferSize);
 
         int playbackChannelConfig = (channelConfig == AudioFormat.CHANNEL_IN_MONO) ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO;
@@ -105,24 +105,35 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
         recorder.startRecording();
         audioTrack.play();
 
+        // This prevents the initial "click" sound more effectively and with lower latency
+        // than skipping the first few buffers.
+        byte[] silence = new byte[bufferSize];
+        audioTrack.write(silence, 0, silence.length);
+
         Thread recordingThread = new Thread(new Runnable() {
             public void run() {
+                // This is critical to prevent stutters and glitches under system load.
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+
                 try {
                     int bytesRead;
-                    int count = 0;
                     byte[] buffer = new byte[bufferSize];
 
                     while (isRecording) {
+                        // NOTE: This check is inefficient in a real-time loop. A BroadcastReceiver
+                        // for route changes is the more robust, long-term solution.
                         if (!isExternalAudioOutputConnected()) {
                             isRecording = false;
                             reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                                 .emit("onAudioRouteChange", "unplugged");
                             break;
                         }
+
                         bytesRead = recorder.read(buffer, 0, buffer.length);
 
-                        // skip first 2 buffers to eliminate "click sound"
-                        if (bytesRead > 0 && ++count > 2) {
+                        // FIX: Removed the "count > 2" condition to process all audio immediately,
+                        // reducing latency. The priming write above handles the initial click.
+                        if (bytesRead > 0) {
                             // Apply gain factor to increase volume
                             for (int i = 0; i < bytesRead; i += 2) {
                                 short sample = (short) ((buffer[i] & 0xFF) | (buffer[i + 1] << 8));

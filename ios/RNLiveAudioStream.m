@@ -1,6 +1,16 @@
 #import "RNLiveAudioStream.h"
 #import <AVFoundation/AVFoundation.h>
 
+@interface RNLiveAudioStream () {
+    // We keep the C-struct for Core Audio state
+    AQRecordState _recordState;
+    
+    // We add Objective-C objects to manage the buffer queue safely
+    NSLock *_bufferLock;
+    NSMutableArray *_reusableOutputBuffers;
+}
+@end
+
 @implementation RNLiveAudioStream
 
 RCT_EXPORT_MODULE();
@@ -8,6 +18,11 @@ RCT_EXPORT_MODULE();
 - (instancetype)init {
     self = [super init];
     if (self) {
+        // Initialize the lock and the buffer pool
+        _bufferLock = [[NSLock alloc] init];
+        _reusableOutputBuffers = [[NSMutableArray alloc] init];
+
+        // We still register for route changes
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(handleAudioRouteChange:)
                                                      name:AVAudioSessionRouteChangeNotification
@@ -28,7 +43,7 @@ RCT_EXPORT_METHOD(init:(NSDictionary *)options) {
     _recordState.mDataFormat.mFormatID = kAudioFormatLinearPCM;
     _recordState.mDataFormat.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
     _recordState.bufferByteSize = options[@"bufferSize"] == nil ? 2048 : [options[@"bufferSize"] unsignedIntValue];
-    _recordState.mSelf = self;
+    _recordState.mSelf = (__bridge void *)self;
 }
 
 RCT_EXPORT_METHOD(start) {
@@ -53,6 +68,13 @@ RCT_EXPORT_METHOD(start) {
         return;
     }
 
+    NSTimeInterval preferredBufferDuration = 0.013; // Or calculate it: (double)_recordState.bufferByteSize / (double)_recordState.mDataFormat.mBytesPerFrame / _recordState.mDataFormat.mSampleRate;
+    [audioSession setPreferredIOBufferDuration:preferredBufferDuration error:&error];
+    if (error != nil) {
+        RCTLog(@"[RNLiveAudioStream] Problem setting preferred buffer duration. Error: %@", error);
+        // This is not a fatal error, so we can continue.
+    }
+
     [audioSession setActive:YES error:&error];
     if (error) {
         RCTLog(@"[RNLiveAudioStream] Problem activating audio session. Error: %@", error);
@@ -73,21 +95,32 @@ RCT_EXPORT_METHOD(start) {
         return;
     }
 
-    for (int i = 0; i < kNumberBuffers; i++) {
-        OSStatus inputBufferStatus = AudioQueueAllocateBuffer(_recordState.mInputQueue, _recordState.bufferByteSize, &_recordState.mInputBuffers[i]);
-        if (inputBufferStatus != 0) {
-            RCTLog(@"[RNLiveAudioStream] Input Buffer allocation failed. status: %i", (int)inputBufferStatus);
-        }
-        OSStatus enqueueInputStatus = AudioQueueEnqueueBuffer(_recordState.mInputQueue, _recordState.mInputBuffers[i], 0, NULL);
-        if (enqueueInputStatus != 0) {
-            RCTLog(@"[RNLiveAudioStream] Input Buffer enqueue failed. status: %i", (int)enqueueInputStatus);
-        }
+    // Prepare the buffer pool before starting
+    [_bufferLock lock];
+    [_reusableOutputBuffers removeAllObjects];
+    [_bufferLock unlock];
 
+    for (int i = 0; i < kNumberBuffers; i++) {
+        // Allocate INPUT buffers and enqueue them as before
+        AudioQueueAllocateBuffer(_recordState.mInputQueue, _recordState.bufferByteSize, &_recordState.mInputBuffers[i]);
+        AudioQueueEnqueueBuffer(_recordState.mInputQueue, _recordState.mInputBuffers[i], 0, NULL);
+
+        // Allocate OUTPUT buffers
         OSStatus outputBufferStatus = AudioQueueAllocateBuffer(_recordState.mOutputQueue, _recordState.bufferByteSize, &_recordState.mOutputBuffers[i]);
-        if (outputBufferStatus != 0) {
-            RCTLog(@"[RNLiveAudioStream] Output Buffer allocation failed. status: %i", (int)outputBufferStatus);
+        if (outputBufferStatus == 0) {
+            // Add the newly allocated, ready-to-use output buffer to our reusable pool
+            [_bufferLock lock];
+            // We wrap the C pointer in an NSValue object to store it in the array
+            [_reusableOutputBuffers addObject:[NSValue valueWithPointer:_recordState.mOutputBuffers[i]]];
+            [_bufferLock unlock];
+        } else {
+             RCTLog(@"[RNLiveAudioStream] Output Buffer allocation failed. status: %i", (int)outputBufferStatus);
         }
     }
+    
+    // Set the mSelf pointer so the C functions can call back to our instance methods
+    _recordState.mSelf = (__bridge void *)self;
+    
     AudioQueueStart(_recordState.mInputQueue, NULL);
     AudioQueueStart(_recordState.mOutputQueue, NULL);
 }
@@ -135,34 +168,60 @@ void HandleInputBuffer(void *inUserData,
         return;
     }
 
-    // Copy data to output buffer and enqueue it
-    AudioQueueBufferRef outputBuffer;
-    OSStatus status = AudioQueueAllocateBuffer(pRecordState->mOutputQueue, pRecordState->bufferByteSize, &outputBuffer);
-    if (status != 0) {
-        RCTLog(@"[RNLiveAudioStream] Output Buffer allocation failed in HandleInputBuffer. status: %i", (int)status);
-        return;
+    // Get a reference to the Objective-C instance
+    RNLiveAudioStream *streamer = (__bridge RNLiveAudioStream*)pRecordState->mSelf;
+    if (!streamer) return;
+
+    AudioQueueBufferRef outputBuffer = NULL;
+
+    [streamer->_bufferLock lock];
+    if (streamer->_reusableOutputBuffers.count > 0) {
+        // Get the first available buffer from the pool
+        NSValue *bufferValue = [streamer->_reusableOutputBuffers firstObject];
+        outputBuffer = [bufferValue pointerValue];
+        // Remove it from the pool so it's not used elsewhere
+        [streamer->_reusableOutputBuffers removeObjectAtIndex:0];
+    }
+    [streamer->_bufferLock unlock];
+
+    if (outputBuffer) {
+        // Copy the recorded data into the output buffer
+        memcpy(outputBuffer->mAudioData, inBuffer->mAudioData, inBuffer->mAudioDataByteSize);
+        outputBuffer->mAudioDataByteSize = inBuffer->mAudioDataByteSize;
+
+        // Enqueue the buffer for playback
+        OSStatus enqueueStatus = AudioQueueEnqueueBuffer(pRecordState->mOutputQueue, outputBuffer, 0, NULL);
+        if (enqueueStatus != 0) {
+            RCTLog(@"[RNLiveAudioStream] Output Buffer enqueue failed. status: %i", (int)enqueueStatus);
+            // If enqueue fails, we must return the buffer to the pool to prevent it from being lost
+            [streamer->_bufferLock lock];
+            [streamer->_reusableOutputBuffers addObject:[NSValue valueWithPointer:outputBuffer]];
+            [streamer->_bufferLock unlock];
+        }
+    } else {
+        // This is a buffer underrun. It means the output queue is consuming buffers faster
+        // than the input is providing them. This can happen if the CPU is too busy.
+        // It can cause an audio glitch.
+        RCTLog(@"[RNLiveAudioStream] No available output buffers. Dropping audio frame.");
     }
 
-    memcpy(outputBuffer->mAudioData, inBuffer->mAudioData, inBuffer->mAudioDataByteSize);
-    outputBuffer->mAudioDataByteSize = inBuffer->mAudioDataByteSize;
-
-    OSStatus enqueueStatus = AudioQueueEnqueueBuffer(pRecordState->mOutputQueue, outputBuffer, 0, NULL);
-    if (enqueueStatus != 0) {
-        RCTLog(@"[RNLiveAudioStream] Output Buffer enqueue failed. status: %i", (int)enqueueStatus);
-    }
-
-    // Re-enqueue input buffer
-    OSStatus inputEnqueueStatus = AudioQueueEnqueueBuffer(pRecordState->mInputQueue, inBuffer, 0, NULL);
-    if (inputEnqueueStatus != 0) {
-        RCTLog(@"[RNLiveAudioStream] Input Buffer re-enqueue failed. status: %i", (int)inputEnqueueStatus);
-    }
+    // Re-enqueue the input buffer to continue recording
+    AudioQueueEnqueueBuffer(pRecordState->mInputQueue, inBuffer, 0, NULL);
 }
 
 void HandleOutputBuffer(void *inUserData,
                         AudioQueueRef inAQ,
                         AudioQueueBufferRef inBuffer) {
-    // This function can be used to manage the output buffers if necessary
-    // For now, we can leave it empty or add logging if needed
+    AQRecordState* pRecordState = (AQRecordState *)inUserData;
+    
+    // Get a reference to the Objective-C instance
+    RNLiveAudioStream *streamer = (__bridge RNLiveAudioStream*)pRecordState->mSelf;
+    if (!streamer) return;
+    
+    [streamer->_bufferLock lock];
+    // Wrap the pointer and add it back to the end of the array for reuse
+    [streamer->_reusableOutputBuffers addObject:[NSValue valueWithPointer:inBuffer]];
+    [streamer->_bufferLock unlock];
 }
 
 - (void)handleAudioRouteChange:(NSNotification *)notification {

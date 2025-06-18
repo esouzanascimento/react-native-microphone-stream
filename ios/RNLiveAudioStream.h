@@ -5,7 +5,7 @@
 #define kNumberBuffers 3
 
 typedef struct {
-    __unsafe_unretained id      mSelf;
+    void                        *mSelf;
     AudioStreamBasicDescription mDataFormat;
     AudioQueueRef               mInputQueue;
     AudioQueueRef               mOutputQueue;
