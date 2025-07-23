@@ -8,6 +8,7 @@
     // We add Objective-C objects to manage the buffer queue safely
     NSLock *_bufferLock;
     NSMutableArray *_reusableOutputBuffers;
+    float _gainFactor;
 }
 @end
 
@@ -21,6 +22,8 @@ RCT_EXPORT_MODULE();
         // Initialize the lock and the buffer pool
         _bufferLock = [[NSLock alloc] init];
         _reusableOutputBuffers = [[NSMutableArray alloc] init];
+
+        _gainFactor = 5.0f; // or 1.0f for no initial gain
 
         // We still register for route changes
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -186,7 +189,32 @@ void HandleInputBuffer(void *inUserData,
 
     if (outputBuffer) {
         // Copy the recorded data into the output buffer
-        memcpy(outputBuffer->mAudioData, inBuffer->mAudioData, inBuffer->mAudioDataByteSize);
+        // Get pointers to the input and output sample buffers (assuming 16-bit audio)
+        int16_t *inputSamples = (int16_t *)inBuffer->mAudioData;
+        int16_t *outputSamples = (int16_t *)outputBuffer->mAudioData;
+
+        // Calculate the number of samples
+        long numberOfSamples = inBuffer->mAudioDataByteSize / sizeof(int16_t);
+
+        // Get the gain factor from our Objective-C instance
+        float gain = streamer->_gainFactor;
+
+        // Apply the gain to each sample
+        for (int i = 0; i < numberOfSamples; i++) {
+            // Multiply sample by gain factor
+            float amplifiedSample = (float)inputSamples[i] * gain;
+
+            // Clamp the value to the valid range for a 16-bit integer to prevent overflow
+            if (amplifiedSample > INT16_MAX) {
+                amplifiedSample = INT16_MAX;
+            } else if (amplifiedSample < INT16_MIN) {
+                amplifiedSample = INT16_MIN;
+            }
+            
+            // Store the result in the output buffer
+            outputSamples[i] = (int16_t)amplifiedSample;
+        }
+
         outputBuffer->mAudioDataByteSize = inBuffer->mAudioDataByteSize;
 
         // Enqueue the buffer for playback
