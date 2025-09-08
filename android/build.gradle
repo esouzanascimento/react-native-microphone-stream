@@ -24,3 +24,10 @@ android {
 dependencies {
     compileOnly 'com.facebook.react:react-native:+'
 }
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}

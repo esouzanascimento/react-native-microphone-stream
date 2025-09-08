@@ -257,12 +257,46 @@ void HandleOutputBuffer(void *inUserData,
     AVAudioSessionRouteChangeReason reason = [userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue];
 
     if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
-        [self sendEventWithName:@"onAudioRouteChange" body:@{@"status": @"unplugged"}];
+        AVAudioSessionRouteDescription *previousRoute = userInfo[AVAudioSessionRouteChangePreviousRouteKey];
+        
+        BOOL externalInputRemoved = NO;
+        // Check if the route that was just disconnected had an external microphone.
+        for (AVAudioSessionPortDescription *port in previousRoute.inputs) {
+            // Any microphone that isn't the built-in one is considered external.
+            if (![port.portType isEqualToString:AVAudioSessionPortBuiltInMic]) {
+                externalInputRemoved = YES;
+                break;
+            }
+        }
+        
+        // If an external input was removed, fire the input change event.
+        if (externalInputRemoved) {
+            RCTLogInfo(@"[RNLiveAudioStream] Audio input device was removed.");
+            [self sendEventWithName:@"onAudioInputChange" body:@{@"status": @"device_removed"}];
+            return; // Prioritize input change, matching Android's behavior.
+        }
+        
+        BOOL externalOutputRemoved = NO;
+        // If no input was removed, check if an external output was removed.
+        for (AVAudioSessionPortDescription *port in previousRoute.outputs) {
+            // Any speaker/headphone that isn't the built-in one is external.
+            if (![port.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker] &&
+                ![port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+                externalOutputRemoved = YES;
+                break;
+            }
+        }
+        
+        // If an external output was removed, fire the original route change event.
+        if (externalOutputRemoved) {
+            RCTLogInfo(@"[RNLiveAudioStream] Audio output device was removed.");
+            [self sendEventWithName:@"onAudioRouteChange" body:@{@"status": @"unplugged"}];
+        }
     }
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-    return @[@"data", @"onAudioRouteChange"];
+    return @[@"data", @"onAudioRouteChange", @"onAudioInputChange"];
 }
 
 - (void)dealloc {

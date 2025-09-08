@@ -6,6 +6,7 @@ import android.media.AudioTrack;
 import android.media.MediaRecorder.AudioSource;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
 import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
@@ -35,6 +36,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
     private final ReactApplicationContext reactContext;
     private final AudioManager audioManager;
+    private AudioDeviceCallback audioDeviceCallback;
 
     private int sampleRateInHz;
     private int channelConfig;
@@ -122,6 +124,30 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(bufferSize)
             .build();
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            audioDeviceCallback = new AudioDeviceCallback() {
+                @Override
+                public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {}
+
+                @Override
+                public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                    for (AudioDeviceInfo device : removedDevices) {
+                        isRecording = false;
+                        if (device.isSource()) {
+                            Log.d("RNLiveAudioStream", "Audio input device removed: " + device.getProductName());
+                            reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onAudioInputChange", "device_removed");
+                            break;
+                        } else {
+                            Log.d("RNLiveAudioStream", "Audio output device removed: " + device.getProductName());
+                            reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onAudioRouteChange", "unplugged");
+                        }
+                    }
+                }
+            };
+        }
     }
 
     private boolean isBluetoothConnectPermissionGranted() {
@@ -134,6 +160,11 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void start() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            Handler mainHandler = new Handler(Looper.getMainLooper());
+            audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler);
+        }
+
         isRecording = true;
 
         AudioDeviceInfo btDevice = findBluetoothDevice();
@@ -187,12 +218,6 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                     byte[] buffer = new byte[bufferSize];
 
                     while (isRecording) {
-                        if (!isExternalAudioOutputConnected()) {
-                            isRecording = false;
-                            reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                                .emit("onAudioRouteChange", "unplugged");
-                            break;
-                        }
                         bytesRead = recorder.read(buffer, 0, buffer.length);
 
                         // skip first 2 buffers to eliminate "click sound"
@@ -220,6 +245,9 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void stop(Promise promise) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+        }
         isRecording = false;
 
         // stop recorder/track safely
@@ -327,6 +355,9 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
         super.onCatalystInstanceDestroy();
         // cleanup receiver
         try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && audioDeviceCallback != null) {
+                audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+        }
             if (scoReceiver != null) {
                 reactContext.unregisterReceiver(scoReceiver);
                 scoReceiver = null;

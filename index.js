@@ -15,7 +15,8 @@ AudioRecord.isExternalAudioOutputConnected = () =>
   });
 
 const eventsMap = {
-  onAudioRouteChange: 'onAudioRouteChange'
+  onAudioRouteChange: 'onAudioRouteChange',
+  onAudioInputChange: 'onAudioInputChange',
 };
 
 AudioRecord.on = (event, callback) => {
